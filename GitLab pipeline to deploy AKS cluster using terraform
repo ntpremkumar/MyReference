@@ -1,0 +1,64 @@
+image:
+  name: hashicorp/terraform:1.2.3
+  entrypoint:
+    - '/usr/bin/env'
+    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+variables:
+  TF_ROOT: ${CI_PROJECT_DIR}/infrastructure
+  TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${CI_PROJECT_NAME}
+
+cache:
+  key: my-services
+  paths:
+    - ${TF_ROOT}/.terraform
+
+before_script:  
+  - cd ${TF_ROOT}
+  - rm -rf .terraform
+  - terraform --version
+  - terraform init
+
+stages:
+  - terraform_validate
+  - terraform_plan
+  - terraform_apply
+
+terraform_validate_dev:
+  stage: terraform_validate
+  environment:
+    name: development
+  script:
+    - terraform validate
+  rules:
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+
+terraform_plan_dev:
+  stage: terraform_plan
+  environment:
+    name: development
+  script:
+    - terraform plan
+    - terraform plan-json
+  dependencies:
+    - terraform_validate_dev
+  artifacts:
+    name: plan deployment
+    paths:
+      - ${TF_ROOT}/plan.cache
+    reports:
+      terraform: ${TF_ROOT}/plan.json
+  rules:
+    - if: $CI_COMMIT_BRANCH == "development"
+
+terraform_apply_dev:
+  stage: terraform_apply
+  environment:
+    name: development
+  script:
+    - terraform apply
+  dependencies:
+    - terraform_plan_dev
+  rules:
+    - if: $CI_COMMIT_BRANCH == "development"
+      when: manual
