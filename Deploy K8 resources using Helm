@@ -1,1 +1,22 @@
 
+.script: &kubeconfig |
+  kubectl config --kubeconfig kubeconfig.yaml set-cluster $KUBE_CLUSTER_NAME --server $KUBE_SERVER
+  kubectl config --kubeconfig kubeconfig.yaml set clusters.${KUBE_CLUSTER_NAME}.certificate-authority-data "$KUBE_CA_AUTHORITY"
+  kubectl config --kubeconfig kubeconfig.yaml set-credentials $NAMESPACE-serviceaccount --token $KUBE_SERVICEACCOUNT_TOKEN
+  kubectl config --kubeconfig kubeconfig.yaml set-context $NAMESPACE --namespace $NAMESPACE --cluster $KUBE_CLUSTER_NAME --user $NAMESPACE-serviceaccount
+  kubectl config --kubeconfig kubeconfig.yaml use-context $NAMESPACE
+
+stages:
+   - deploy
+
+deploy:
+   stage: deploy
+   image: lwolf/helm-kubectl-docker:v1103_291
+   tags:
+    - tagname
+   script:
+    - *kubeconfig
+    - export KUBECONFIG=$(pwd)/kubeconfig.yaml
+    - echo $KUBECONFIG
+    - helm init --client-only
+    - helm install --name chartname pathname --tiller-namespace $NAMESPACE
