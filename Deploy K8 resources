@@ -1,0 +1,42 @@
+variables:
+  repo: reponame  
+  imagetag: tagname
+  k8sapp: appname
+  docker_reg: registryname
+  docker_user: userid
+  docker_pwd: $DOCK_REG_PWD  #from env variable
+  k8sconfig: /home/.kube/config
+  k8scontext: contextname
+  k8sns: namespace
+
+stages:
+  - build-image
+  - deploy-app
+
+build-image:
+    stage: build-image
+    script:
+    - echo Building image -  $imagetag/$CI_ENVIRONMENT_NAME with  "$USER"
+    - docker build --build-arg ENV=$CI_ENVIRONMENT_NAME  -t $imagetag/$CI_ENVIRONMENT_NAME  .
+    - echo Build successful, image tagged to  $imagetag/$CI_ENVIRONMENT_NAME
+    - echo docker login $docker_reg -u $docker_user -p $docker_pwd
+    - docker login $docker_reg -u $docker_user -p $docker_pwd
+    - docker push $imagetag/$CI_ENVIRONMENT_NAME
+    tags:
+        - tagname
+    when: manual
+    allow_failure: true
+    environment:
+        name: envname
+
+deploy-app:
+  stage: deploy
+  script: 
+  - kubectl apply -f {filename} -n $k8sns --kubeconfig $k8sconfig --context $k8scontext
+#  - rm -rf ./* #Build Server Cleanup
+    tags:
+        - tagname
+    when: manual
+    allow_failure: true
+    environment:
+        name: envname
