@@ -1,0 +1,108 @@
+# gitLab pipeline to deploy AKS cluster using terraform
+
+image:
+  name: hashicorp/terraform:1.2.4
+  entrypoint:
+    - /usr/bin/env
+    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+variables:
+  TF_IN_AUTOMATION: "true"
+  TF_ROOT: ${CI_PROJECT_DIR}/terraform
+  GITLAB_TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${CI_PROJECT_NAME}
+  ARM_CLIENT_ID: $ARM_CLIENT_ID
+  ARM_CLIENT_SECRET: $ARM_CLIENT_SECRET
+  ARM_SUBSCRIPTION_ID: $ARM_SUBSCRIPTION_ID
+  ARM_TENANT_ID: $ARM_TENANT_ID
+
+stages: 
+  - terraform_validate
+  - terraform_plan
+  - terraform_apply
+  - terraform_destroy
+  - app_deploy
+
+cache:
+  key: "$CI_COMMIT_SHA"
+  path:
+    - .terraform
+
+before_script:
+  - cd ${TF_ROOT} && pwd
+  - terraform --version
+  - terraform init 
+#  - terraform init -reconfigure -backend-config="address=${GITLAB_TF_ADDRESS}" -backend-config="lock_address=${GITLAB_TF_ADDRESS}/lock" -backend-config="unlock_address=${GITLAB_TF_ADDRESS}/lock" -backend-config="username=gitlab-ci-token" -backend-config="password=${CI_JOB_TOKEN}" -backend-config="lock_method=POST" -backend-config="unlock_method=DELETE" -backend-config="retry_wait_min=5"
+    
+terraform_validate_dev:
+  stage: terraform_validate
+  environment:
+    name: development
+  script:
+    - terraform validate
+    - terraform fmt -check=true
+  allow_failure: true
+  except:
+    - master
+
+terraform_plan_dev:
+  stage: terraform_plan
+  environment:
+    name: development
+  script:
+    - terraform plan --out plan
+  dependencies:
+    - terraform_validate_dev
+  artifacts:
+    name: plan
+    path:
+      - plan
+
+terraform_apply_dev:
+  stage: terraform_apply
+  environment:
+    name: development
+  script:
+    - terraform apply --auto-approve 
+  dependencies:
+    - terraform_plan_dev
+
+terraform_destroy_dev:
+  stage: terraform_destroy
+    name: development
+  script:
+    - terraform destroy --auto-approve 
+  dependencies:
+    - terraform_destroy_dev
+  rules:
+      when: manual
+
+app_deploy:
+  stage: app_deploy
+  image: ubuntu-edge
+  environment:
+    name: development
+  script:
+    - sudo apt-get update
+# install helm
+    - curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    - chmod 700 get_helm.sh
+    - ./get_helm.sh
+    - helm version
+# install kubectl 
+    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    - curl -LO "https://dl.k8s.io/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256"
+    - echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+    - sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+    - kubectl version --client
+# install azure cli
+    - curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+# point kubectl to the aks cluster
+    - az aks get-credentials --resource-group aks-rg1 --name aks-cluster-1
+# verify that the cluster nodes are running
+    - kubectl get nodes
+# deploy k8 resources
+    - git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/ntpremkumar1/helm.git
+    - cd helm-resources/
+    - helm install helm-resources helm-resources/
+  dependencies:
+    - terraform_apply_dev
